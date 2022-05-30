@@ -1,10 +1,12 @@
 package proxy_server
 
 import (
+	"encoding/json"
 	"errors"
 	"log"
 	"math/rand"
 	"net"
+	"os"
 	"syscall"
 	"time"
 
@@ -12,10 +14,18 @@ import (
 )
 
 type portProxy struct {
-	Client   net.Addr
-	Server   net.Addr
-	prepared bool // 两组地址都设置
-	done     chan interface{}
+	Client net.TCPAddr
+	Server net.TCPAddr
+	done   chan interface{}
+}
+
+func addrReady(addr net.TCPAddr) bool {
+	return addr.IP != nil && addr.Port != 0
+}
+
+// 两组地址都设置
+func (p portProxy) Ready() bool {
+	return addrReady(p.Client) && addrReady(p.Server)
 }
 
 const startPort = 33333
@@ -61,4 +71,31 @@ func ReuseConfig() net.ListenConfig {
 		},
 	}
 	return cfg
+}
+
+const dataFile = "../proxyEntry.json"
+
+func Map2File(dic map[string]*portProxy) (err error) {
+	fPtr, err := os.Create(dataFile)
+
+	if err != nil {
+		return
+	}
+
+	log.Printf("正在写入: %s\n", dataFile)
+	defer fPtr.Close()
+	encoder := json.NewEncoder(fPtr)
+	err = encoder.Encode(dic)
+	return
+}
+
+func File2Map(dic *map[string]*portProxy) (err error) {
+	fPtr, err := os.Open(dataFile)
+	if err != nil {
+		return
+	}
+	defer fPtr.Close()
+	decoder := json.NewDecoder(fPtr)
+	decoder.Decode(&dic)
+	return
 }

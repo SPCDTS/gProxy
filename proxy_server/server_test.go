@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"g-proxy/utils"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -17,12 +16,87 @@ import (
 	"time"
 )
 
+func TestReuse(t *testing.T) {
+	t.Run("先通配符", func(t *testing.T) {
+		lc1 := ReuseConfig()
+		ln1, err := lc1.Listen(context.Background(), "tcp", "0.0.0.0:11111")
+		if err != nil {
+			t.Fatalf("创建通配绑定出错: %s", err)
+		} else {
+			defer ln1.Close()
+		}
+		lc2 := ReuseConfig()
+		ln2, err := lc2.Listen(context.Background(), "tcp", "172.119.1.2:11111")
+		if err != nil {
+			t.Logf("创建特定绑定出错: %s", err)
+		} else {
+			defer ln2.Close()
+		}
+
+	})
+
+	t.Run("后通配符", func(t *testing.T) {
+		lc2 := ReuseConfig()
+		ln2, err := lc2.Listen(context.Background(), "tcp", "172.119.1.2:11111")
+		if err != nil {
+			t.Fatalf("创建特定绑定出错: %s", err)
+		} else {
+			defer ln2.Close()
+		}
+
+		lc1 := ReuseConfig()
+		ln1, err := lc1.Listen(context.Background(), "tcp", "0.0.0.0:11111")
+		if err != nil {
+			t.Errorf("创建通配绑定出错: %s", err)
+		} else {
+			defer ln1.Close()
+		}
+
+	})
+}
+
+func TestJson(t *testing.T) {
+	dic := map[string]*portProxy{
+		"test": {
+			Client: net.TCPAddr{
+				IP:   net.ParseIP("11.11.11.11"),
+				Port: 1000,
+			},
+			Server: net.TCPAddr{
+				IP:   net.ParseIP("11.11.11.22"),
+				Port: 1002,
+			},
+		},
+	}
+	err := Map2File(dic)
+
+	dic["gitlab"] = &portProxy{
+		Client: net.TCPAddr{
+			IP:   net.ParseIP("172.19.243.18"),
+			Port: 80,
+		},
+		Server: net.TCPAddr{
+			IP:   net.ParseIP("11.11.222.22"),
+			Port: 1111,
+		},
+	}
+	Map2File(dic)
+	t.Log(err)
+	dic2 := make(map[string]*portProxy)
+	err = File2Map(&dic2)
+	if err != nil {
+		t.Log(err)
+	}
+	t.Logf("%#v", dic2["test"].Client)
+
+}
+
 func TestRegister(t *testing.T) {
-	addr1 := &net.TCPAddr{
+	addr1 := net.TCPAddr{
 		IP:   net.ParseIP("127.0.0.1"),
 		Port: 8081,
 	}
-	addr2 := &net.TCPAddr{
+	addr2 := net.TCPAddr{
 		IP:   net.ParseIP("127.0.0.1"),
 		Port: 8082,
 	}
@@ -47,7 +121,7 @@ func TestRegister(t *testing.T) {
 		proxyServer.ServeHTTP(query_response, query_request)
 		assertStatus(t, query_response, http.StatusOK)
 		result_addr := getQueryBody(t, query_response)
-		assertProxyPair(t, result_addr, addr2)
+		assertProxyPair(t, *result_addr, addr2)
 	})
 	forwardingRequest := newForwardingRequest(name)
 	proxyServer.ServeHTTP(httptest.NewRecorder(), forwardingRequest)
@@ -111,81 +185,7 @@ func TestRegister(t *testing.T) {
 	})
 }
 
-func TestReuse(t *testing.T) {
-	t.Run("先通配符", func(t *testing.T) {
-		lc1 := ReuseConfig()
-		ln1, err := lc1.Listen(context.Background(), "tcp", "0.0.0.0:11111")
-		if err != nil {
-			t.Fatalf("创建通配绑定出错: %s", err)
-		} else {
-			defer ln1.Close()
-		}
-		lc2 := ReuseConfig()
-		ln2, err := lc2.Listen(context.Background(), "tcp", "172.119.1.2:11111")
-		if err != nil {
-			t.Logf("创建特定绑定出错: %s", err)
-		} else {
-			defer ln2.Close()
-		}
-
-	})
-
-	t.Run("后通配符", func(t *testing.T) {
-		lc2 := ReuseConfig()
-		ln2, err := lc2.Listen(context.Background(), "tcp", "172.119.1.2:11111")
-		if err != nil {
-			t.Fatalf("创建特定绑定出错: %s", err)
-		} else {
-			defer ln2.Close()
-		}
-
-		lc1 := ReuseConfig()
-		ln1, err := lc1.Listen(context.Background(), "tcp", "0.0.0.0:11111")
-		if err != nil {
-			t.Errorf("创建通配绑定出错: %s", err)
-		} else {
-			defer ln1.Close()
-		}
-
-	})
-}
-
-func TestJson(t *testing.T) {
-	dic := map[string]interface{}{
-		"test": &portProxy{
-			Client: &net.TCPAddr{
-				IP:   net.ParseIP("11.11.11.11"),
-				Port: 1000,
-			},
-			Server: &net.TCPAddr{
-				IP:   net.ParseIP("11.11.11.22"),
-				Port: 1002,
-			},
-		},
-	}
-	err := utils.Map2File(dic)
-
-	dic["gitlab"] = &portProxy{
-		Client: &net.TCPAddr{
-			IP:   net.ParseIP("172.19.243.18"),
-			Port: 80,
-		},
-		Server: &net.TCPAddr{
-			IP:   net.ParseIP("11.11.222.22"),
-			Port: 1111,
-		},
-	}
-	utils.Map2File(dic)
-	t.Log(err)
-	dic2 := make(map[string]*portProxy)
-	err = utils.File2Map(&dic2)
-	if err != nil {
-		t.Log(err)
-	}
-	t.Logf("%#v", dic2)
-}
-
-func assertProxyPair(t *testing.T, addr net.Addr, target_addr net.Addr) {
+func assertProxyPair(t *testing.T, addr net.TCPAddr, target_addr net.TCPAddr) {
 	t.Helper()
 	if addr.String() != target_addr.String() {
 		t.Errorf("go %v, want %v", addr, target_addr)
@@ -199,7 +199,7 @@ func assertStatus(t *testing.T, got *httptest.ResponseRecorder, want int) {
 	}
 }
 
-func newRegisterRequest(name string, addr *net.TCPAddr, position string) *http.Request {
+func newRegisterRequest(name string, addr net.TCPAddr, position string) *http.Request {
 	request, _ := http.NewRequest(http.MethodPost, "/register", nil)
 	params := url.Values{}
 	params.Set("name", name)

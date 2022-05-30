@@ -1,1 +1,1 @@
-{"gitlab":{"Client":{"IP":"172.19.243.18","Port":80,"Zone":""},"Server":{"IP":"11.11.222.22","Port":1111,"Zone":""}},"test":{"Client":{"IP":"11.11.11.11","Port":1000,"Zone":""},"Server":{"IP":"11.11.11.22","Port":1002,"Zone":""}}}
+{"gitlab":{"Client":{"IP":"172.19.243.18","Port":80,"Zone":""},"Server":{"IP":"11.11.222.22","Port":1111,"Zone":""}},"test":{"Client":{"IP":"127.0.0.1","Port":8081,"Zone":""},"Server":{"IP":"127.0.0.1","Port":8082,"Zone":""}}}

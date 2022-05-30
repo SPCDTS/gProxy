@@ -64,9 +64,9 @@ func (p *ProxyServer) tcpListen(name string) {
 }
 
 // 处理建立的连接
-func (p *ProxyServer) tcpHandle(server net.Addr, tcpConn net.Conn) {
+func (p *ProxyServer) tcpHandle(server net.TCPAddr, tcpConn net.Conn) {
 
-	remote_tcp, err := GetCustomConn(5*time.Second, localIP, server, 5)
+	remote_tcp, err := GetCustomConn(5*time.Second, localIP, &server, 5)
 	if err != nil {
 		fmt.Printf("无法连接至目标服务器: %s\n", err)
 		if remote_tcp != nil {
@@ -100,11 +100,10 @@ func (p *ProxyServer) tcpHandle(server net.Addr, tcpConn net.Conn) {
 }
 
 // 新增代理对
-func (p *ProxyServer) addProxy(name string, addr net.Addr, position string) {
+func (p *ProxyServer) addProxy(name string, addr net.TCPAddr, position string) {
 	proxyPair, ok := p.proxyDict[name]
 	if !ok {
 		proxyPair = new(portProxy)
-		p.proxyDict[name] = proxyPair
 	}
 	switch position {
 	case Client:
@@ -114,16 +113,17 @@ func (p *ProxyServer) addProxy(name string, addr net.Addr, position string) {
 	default:
 	}
 
-	if proxyPair.Server != nil && proxyPair.Client != nil {
-		proxyPair.prepared = true
-		// 在代理对的客户端和服务端都准备好时落盘
+	p.proxyDict[name] = proxyPair
 
+	if proxyPair.Ready() {
+		// 在代理对的客户端和服务端都准备好时落盘
+		Map2File(p.proxyDict)
 	}
 }
 
-func (p *ProxyServer) match(name string, position string) (dst net.Addr) {
+func (p *ProxyServer) match(name string, position string) (dst net.TCPAddr) {
 	proxyPair, ok := p.proxyDict[name]
-	if ok && proxyPair.prepared {
+	if ok && proxyPair.Ready() {
 		switch position {
 		case Client:
 			return proxyPair.Client
@@ -132,7 +132,7 @@ func (p *ProxyServer) match(name string, position string) (dst net.Addr) {
 		default:
 		}
 	}
-	return nil
+	return
 }
 
 func (p *ProxyServer) Register(w http.ResponseWriter, r *http.Request) {
@@ -145,7 +145,7 @@ func (p *ProxyServer) Register(w http.ResponseWriter, r *http.Request) {
 	}
 	// 如果已经有正在进行的连接，则拒绝注册请求
 	if proxy, ok := p.proxyDict[name]; ok {
-		if proxy.prepared && proxy.done != nil {
+		if proxy.Ready() && proxy.done != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -183,7 +183,7 @@ func (p *ProxyServer) Forwarding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !proxy.prepared {
+	if !proxy.Ready() {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -202,14 +202,14 @@ func (p *ProxyServer) StopForwarding(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func getRegisterParams(r *http.Request) (name string, addr net.Addr, position string, err error) {
+func getRegisterParams(r *http.Request) (name string, addr net.TCPAddr, position string, err error) {
 	r.ParseForm()
 	name = r.Form.Get("name")
 	host := r.Form.Get("host")
 	port, err := strconv.Atoi(r.Form.Get("port"))
 	position = r.Form.Get("position")
 
-	addr = &net.TCPAddr{
+	addr = net.TCPAddr{
 		IP:   net.ParseIP(host),
 		Port: port,
 	}
@@ -226,6 +226,7 @@ func getQueryParams(r *http.Request) (name string, position string, err error) {
 func NewProxyServer() *ProxyServer {
 	p := new(ProxyServer)
 	p.proxyDict = make(map[string]*portProxy)
+	File2Map(&p.proxyDict)
 
 	router := http.NewServeMux()
 	router.Handle("/register", http.HandlerFunc(p.Register))
