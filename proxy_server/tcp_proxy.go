@@ -12,8 +12,8 @@ import (
 )
 
 type portProxy struct {
-	Client   *net.Addr
-	Server   *net.Addr
+	Client   net.Addr
+	Server   net.Addr
 	prepared bool // 两组地址都设置
 	done     chan interface{}
 }

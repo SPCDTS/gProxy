@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"g-proxy/utils"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -34,12 +35,12 @@ func TestRegister(t *testing.T) {
 		response_1 := httptest.NewRecorder()
 		proxyServer.ServeHTTP(response_1, request_1)
 		assertStatus(t, response_1, http.StatusAccepted)
-		assertProxyPair(t, *proxyServer.proxyDict[name].Client, addr1)
+		assertProxyPair(t, proxyServer.proxyDict[name].Client, addr1)
 
 		request_2 := newRegisterRequest(name, addr2, Server)
 		response_2 := httptest.NewRecorder()
 		proxyServer.ServeHTTP(response_2, request_2)
-		assertProxyPair(t, *proxyServer.proxyDict[name].Server, addr2)
+		assertProxyPair(t, proxyServer.proxyDict[name].Server, addr2)
 
 		query_request := newQueryRequest(name, Server)
 		query_response := httptest.NewRecorder()
@@ -147,6 +148,41 @@ func TestReuse(t *testing.T) {
 		}
 
 	})
+}
+
+func TestJson(t *testing.T) {
+	dic := map[string]interface{}{
+		"test": &portProxy{
+			Client: &net.TCPAddr{
+				IP:   net.ParseIP("11.11.11.11"),
+				Port: 1000,
+			},
+			Server: &net.TCPAddr{
+				IP:   net.ParseIP("11.11.11.22"),
+				Port: 1002,
+			},
+		},
+	}
+	err := utils.Map2File(dic)
+
+	dic["gitlab"] = &portProxy{
+		Client: &net.TCPAddr{
+			IP:   net.ParseIP("172.19.243.18"),
+			Port: 80,
+		},
+		Server: &net.TCPAddr{
+			IP:   net.ParseIP("11.11.222.22"),
+			Port: 1111,
+		},
+	}
+	utils.Map2File(dic)
+	t.Log(err)
+	dic2 := make(map[string]*portProxy)
+	err = utils.File2Map(&dic2)
+	if err != nil {
+		t.Log(err)
+	}
+	t.Logf("%#v", dic2)
 }
 
 func assertProxyPair(t *testing.T, addr net.Addr, target_addr net.Addr) {

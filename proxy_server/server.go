@@ -28,6 +28,7 @@ type ProxyServer struct {
 
 // 侦听对应代理服务的端口
 func (p *ProxyServer) tcpListen(name string) {
+	// heartbeatStream := make(chan interface{}, 1)
 	proxy := p.proxyDict[name]
 	lc := ReuseConfig()
 	ln, err := lc.Listen(context.Background(), "tcp", p.cAddr.String()) // 监听Client端口
@@ -53,7 +54,7 @@ func (p *ProxyServer) tcpListen(name string) {
 	for {
 		select {
 		case tcp_Conn := <-cnn_chan:
-			go p.tcpHandle(*proxy.Server, tcp_Conn) //创建新的协程进行转发
+			go p.tcpHandle(proxy.Server, tcp_Conn) //创建新的协程进行转发
 		case <-proxy.done:
 			close(cnn_chan)
 			fmt.Println("proxy server: close client connection.")
@@ -98,7 +99,8 @@ func (p *ProxyServer) tcpHandle(server net.Addr, tcpConn net.Conn) {
 
 }
 
-func (p *ProxyServer) addProxy(name string, addr *net.Addr, position string) {
+// 新增代理对
+func (p *ProxyServer) addProxy(name string, addr net.Addr, position string) {
 	proxyPair, ok := p.proxyDict[name]
 	if !ok {
 		proxyPair = new(portProxy)
@@ -114,10 +116,12 @@ func (p *ProxyServer) addProxy(name string, addr *net.Addr, position string) {
 
 	if proxyPair.Server != nil && proxyPair.Client != nil {
 		proxyPair.prepared = true
+		// 在代理对的客户端和服务端都准备好时落盘
+
 	}
 }
 
-func (p *ProxyServer) match(name string, position string) (dst *net.Addr) {
+func (p *ProxyServer) match(name string, position string) (dst net.Addr) {
 	proxyPair, ok := p.proxyDict[name]
 	if ok && proxyPair.prepared {
 		switch position {
@@ -146,7 +150,7 @@ func (p *ProxyServer) Register(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	p.addProxy(name, &addr, position)
+	p.addProxy(name, addr, position)
 	w.WriteHeader(http.StatusAccepted)
 	fmt.Printf("Register [%s-%s]: %s\n", name, position, addr.String())
 }
