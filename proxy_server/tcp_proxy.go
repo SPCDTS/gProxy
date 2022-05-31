@@ -1,12 +1,14 @@
 package proxy_server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
 	"math/rand"
 	"net"
 	"os"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -28,20 +30,17 @@ func (p portProxy) Ready() bool {
 	return addrReady(p.Client) && addrReady(p.Server)
 }
 
-const startPort = 33333
-const endPort = 33444
-
-func getPort() (port int) {
-	port = startPort + rand.Intn(endPort-startPort+1)
+func getPort(minP, maxP int) (port int) {
+	port = minP + rand.Intn(maxP-minP+1)
 	return
 }
 
-func GetCustomConn(timeout time.Duration, localIP string, remoteAddress net.Addr, maxTry int) (net.Conn, error) {
+func CustomConn(timeout time.Duration, localIP string, remoteAddress net.Addr, minP, maxP int, maxTry int) (net.Conn, error) {
 	for i := 0; i < maxTry; i++ {
 		for j := 0; j < 5; j++ {
 			localAddr := net.TCPAddr{
 				IP:   net.ParseIP(localIP),
-				Port: getPort(),
+				Port: getPort(minP, maxP),
 			}
 			d := net.Dialer{
 				Timeout:   timeout,
@@ -59,6 +58,27 @@ func GetCustomConn(timeout time.Duration, localIP string, remoteAddress net.Addr
 	}
 
 	return nil, errors.New("无空闲端口，无法建立连接")
+}
+
+func CustomListen(ip string, minP, maxP int, maxTry int) (net.Listener, error) {
+	lc := ReuseConfig()
+	for i := 0; i < maxTry; i++ {
+		for j := 0; j < 5; j++ {
+			port := getPort(minP, maxP)
+			address := ip + ":" + strconv.Itoa(port)
+			log.Printf("正在进行第<%d>次尝试，使用:%s", j+1, address)
+			ln, err := lc.Listen(context.Background(), "tcp", address) // 监听Client端口
+			if err == nil {
+				return ln, nil
+			} else {
+				log.Printf("无法连接:%s\n", err.Error())
+			}
+
+		}
+		log.Println("正在退避")
+		time.Sleep(time.Duration(rand.Int63n(5)) * time.Second) // 找不到就先退避
+	}
+	return nil, errors.New("无空闲端口，无法监听客户端连接")
 }
 
 func ReuseConfig() net.ListenConfig {

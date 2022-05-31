@@ -1,7 +1,6 @@
 package proxy_server
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,27 +15,31 @@ const jsonContentType = "application/json"
 const Client = "client"
 const Server = "server"
 const localIP = "172.119.1.2"
+const startPort = 33333
+const endPort = 33444
 
 var logger = log.Default()
 
 type ProxyServer struct {
 	http.Handler
-	proxyDict map[string]*portProxy
-	cAddr     net.Addr
-	sAddr     net.Addr
+	proxyDict    map[string]*portProxy
+	clientIP     string
+	serverIP     string
+	proxyMinPort int
+	proxyMaxPort int
 }
 
 // 侦听对应代理服务的端口
-func (p *ProxyServer) tcpListen(name string) {
+func (p *ProxyServer) tcpListen(name string) string {
 	// heartbeatStream := make(chan interface{}, 1)
 	proxy := p.proxyDict[name]
-	lc := ReuseConfig()
-	ln, err := lc.Listen(context.Background(), "tcp", p.cAddr.String()) // 监听Client端口
+	ln, err := CustomListen(p.serverIP, p.proxyMinPort, p.proxyMaxPort, 5)
 	if err != nil {
-		fmt.Println("无法侦听Client端口: ", err)
-		return
+		fmt.Println(err)
+		return ""
 	}
-	defer ln.Close()
+
+	log.Printf("正在侦听: %s\n", ln.Addr().String())
 
 	cnn_chan := make(chan net.Conn, 1)
 	// 新建一个goroutine去不断地侦听端口，当ln被close的时候，会退出
@@ -44,29 +47,35 @@ func (p *ProxyServer) tcpListen(name string) {
 		for {
 			tcp_Conn, err := ln.Accept()
 			if err != nil {
-				fmt.Printf("停止接收连接: %s", err)
+				fmt.Printf("停止接收连接: %s\n", err)
 				return
 			}
 			cnn_chan <- tcp_Conn
 		}
 	}()
 
-	for {
-		select {
-		case tcp_Conn := <-cnn_chan:
-			go p.tcpHandle(proxy.Server, tcp_Conn) //创建新的协程进行转发
-		case <-proxy.done:
-			close(cnn_chan)
-			fmt.Println("proxy server: close client connection.")
-			return
+	go func() {
+		defer ln.Close()
+		for {
+			select {
+			case tcp_Conn := <-cnn_chan:
+				go p.tcpHandle(proxy.Server, tcp_Conn) //创建新的协程进行转发
+			case <-proxy.done:
+				close(cnn_chan)
+				fmt.Println("proxy server: close client connection.")
+				return
+			}
 		}
-	}
+	}()
+
+	return ln.Addr().String()
+
 }
 
 // 处理建立的连接
 func (p *ProxyServer) tcpHandle(server net.TCPAddr, tcpConn net.Conn) {
 
-	remote_tcp, err := GetCustomConn(5*time.Second, localIP, &server, 5)
+	remote_tcp, err := CustomConn(5*time.Second, localIP, &server, p.proxyMinPort, p.proxyMaxPort, 5)
 	if err != nil {
 		fmt.Printf("无法连接至目标服务器: %s\n", err)
 		if remote_tcp != nil {
@@ -189,8 +198,9 @@ func (p *ProxyServer) Forwarding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxy.done = make(chan interface{})
-	go p.tcpListen(name)
+	proxyAddr := p.tcpListen(name)
 	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(proxyAddr))
 }
 
 func (p *ProxyServer) StopForwarding(w http.ResponseWriter, r *http.Request) {
@@ -235,13 +245,9 @@ func NewProxyServer() *ProxyServer {
 	router.Handle("/stop", http.HandlerFunc(p.StopForwarding))
 
 	p.Handler = router
-	p.cAddr = &net.TCPAddr{
-		IP:   net.ParseIP(localIP),
-		Port: 8888,
-	}
-	p.sAddr = &net.TCPAddr{
-		IP:   net.ParseIP(localIP),
-		Port: 8889,
-	}
+	p.clientIP = localIP
+	p.serverIP = localIP
+	p.proxyMinPort = startPort
+	p.proxyMaxPort = endPort
 	return p
 }

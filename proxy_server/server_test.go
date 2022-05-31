@@ -124,11 +124,11 @@ func TestRegister(t *testing.T) {
 		assertProxyPair(t, *result_addr, addr2)
 	})
 	forwardingRequest := newForwardingRequest(name)
-	proxyServer.ServeHTTP(httptest.NewRecorder(), forwardingRequest)
-
+	forwardingResponse := httptest.NewRecorder()
+	proxyServer.ServeHTTP(forwardingResponse, forwardingRequest)
+	client_address := forwardingResponse.Body.String()
 	t.Run("测试TCP转发", func(t *testing.T) {
 		go proxyServer.tcpListen(name)
-		client_address := proxyServer.cAddr
 		server_address := addr2
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -145,7 +145,7 @@ func TestRegister(t *testing.T) {
 
 			for {
 				var err error
-				client_cnn, err = d.Dial("tcp", client_address.String()) // 尝试从8001端口连接客户端端口
+				client_cnn, err = d.Dial("tcp", client_address) // 尝试从8001端口连接客户端端口
 				if err == nil {
 					break
 				}
