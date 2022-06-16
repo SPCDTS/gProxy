@@ -1,0 +1,5 @@
+WebPort: 18085
+# 用于代理服务器的端口
+proxy:
+  minPort: 33333 
+  maxPort: 33444

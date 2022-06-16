@@ -1,4 +1,4 @@
-package proxy_server
+package gproxy
 
 import (
 	"context"
@@ -28,6 +28,20 @@ func addrReady(addr net.TCPAddr) bool {
 // 两组地址都设置
 func (p portProxy) Ready() bool {
 	return addrReady(p.Client) && addrReady(p.Server)
+}
+
+// 通过判断done channel是否打开来确定是否正在进行转发
+func (p portProxy) Running() bool {
+	if p.Ready() && p.done != nil {
+		select {
+		case _, open := <-p.done:
+			if open {
+				return true
+			}
+		default:
+		}
+	}
+	return false
 }
 
 func getPort(minP, maxP int) (port int) {

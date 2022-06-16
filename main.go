@@ -1,7 +1,7 @@
 package main
 
 import (
-	proxy_server "g-proxy/proxy_server"
+	proxy_server "g-proxy/gproxy"
 	"log"
 	"net/http"
 )

@@ -1,4 +1,4 @@
-package proxy_server
+package gproxy
 
 import (
 	"bytes"

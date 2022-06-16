@@ -1,4 +1,4 @@
-package proxy_server
+package gproxy
 
 import (
 	"encoding/json"
@@ -68,6 +68,7 @@ func (p *ProxyServer) tcpListen(name string) string {
 		}
 	}()
 
+	// 返回绑定的地址
 	return ln.Addr().String()
 
 }
@@ -155,8 +156,14 @@ func (p *ProxyServer) Register(w http.ResponseWriter, r *http.Request) {
 	// 如果已经有正在进行的连接，则拒绝注册请求
 	if proxy, ok := p.proxyDict[name]; ok {
 		if proxy.Ready() && proxy.done != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
+			select {
+			case _, open := <-proxy.done:
+				if open {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+			default:
+			}
 		}
 	}
 	p.addProxy(name, addr, position)
@@ -177,6 +184,7 @@ func (p *ProxyServer) Query(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// 开始转发时，会返回代理服务器所侦听的客户端的端口
 func (p *ProxyServer) Forwarding(w http.ResponseWriter, r *http.Request) {
 	logger.Println("Forwarding")
 	r.ParseForm()
@@ -195,6 +203,17 @@ func (p *ProxyServer) Forwarding(w http.ResponseWriter, r *http.Request) {
 	if !proxy.Ready() {
 		w.WriteHeader(http.StatusBadRequest)
 		return
+	}
+
+	if proxy.done != nil {
+		select {
+		case _, open := <-proxy.done:
+			if open {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+		default:
+		}
 	}
 
 	proxy.done = make(chan interface{})
