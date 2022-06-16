@@ -58,10 +58,6 @@ func TestReuse(t *testing.T) {
 func TestJson(t *testing.T) {
 	dic := map[string]*portProxy{
 		"test": {
-			Client: net.TCPAddr{
-				IP:   net.ParseIP("11.11.11.11"),
-				Port: 1000,
-			},
 			Server: net.TCPAddr{
 				IP:   net.ParseIP("11.11.11.22"),
 				Port: 1002,
@@ -71,10 +67,6 @@ func TestJson(t *testing.T) {
 	err := Map2File(dic)
 
 	dic["gitlab"] = &portProxy{
-		Client: net.TCPAddr{
-			IP:   net.ParseIP("172.19.243.18"),
-			Port: 80,
-		},
 		Server: net.TCPAddr{
 			IP:   net.ParseIP("11.11.222.22"),
 			Port: 1111,
@@ -87,7 +79,7 @@ func TestJson(t *testing.T) {
 	if err != nil {
 		t.Log(err)
 	}
-	t.Logf("%#v", dic2["test"].Client)
+	t.Logf("%#v", dic2["test"].Server)
 
 }
 
@@ -96,40 +88,32 @@ func TestRegister(t *testing.T) {
 		IP:   net.ParseIP("127.0.0.1"),
 		Port: 8081,
 	}
-	addr2 := net.TCPAddr{
-		IP:   net.ParseIP("127.0.0.1"),
-		Port: 8082,
-	}
+
 	name := "test"
 	proxyServer := NewProxyServer()
 
-	t.Run("注册两个地址,并查询它", func(t *testing.T) {
+	t.Run("注册1个地址,并查询它", func(t *testing.T) {
 
-		request_1 := newRegisterRequest(name, addr1, Client)
+		request_1 := newRegisterRequest(name, addr1)
 		response_1 := httptest.NewRecorder()
 		proxyServer.ServeHTTP(response_1, request_1)
 		assertStatus(t, response_1, http.StatusAccepted)
-		assertProxyPair(t, proxyServer.proxyDict[name].Client, addr1)
+		assertProxyPair(t, proxyServer.proxyDict[name].Server, addr1)
 
-		request_2 := newRegisterRequest(name, addr2, Server)
-		response_2 := httptest.NewRecorder()
-		proxyServer.ServeHTTP(response_2, request_2)
-		assertProxyPair(t, proxyServer.proxyDict[name].Server, addr2)
-
-		query_request := newQueryRequest(name, Server)
+		query_request := newQueryRequest(name, "direct")
 		query_response := httptest.NewRecorder()
 		proxyServer.ServeHTTP(query_response, query_request)
 		assertStatus(t, query_response, http.StatusOK)
 		result_addr := getQueryBody(t, query_response)
-		assertProxyPair(t, *result_addr, addr2)
+		assertProxyPair(t, *result_addr, addr1)
 	})
+
 	forwardingRequest := newForwardingRequest(name)
 	forwardingResponse := httptest.NewRecorder()
 	proxyServer.ServeHTTP(forwardingResponse, forwardingRequest)
 	client_address := forwardingResponse.Body.String()
 	t.Run("测试TCP转发", func(t *testing.T) {
-		go proxyServer.tcpListen(name)
-		server_address := addr2
+		// go proxyServer.tcpListen(name)
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() {
@@ -164,6 +148,7 @@ func TestRegister(t *testing.T) {
 			fmt.Println("client: close client->proxy connection")
 		}()
 
+		server_address := addr1
 		go func() {
 			defer wg.Done()
 			server_ln, _ := net.Listen("tcp", server_address.String())
@@ -199,22 +184,21 @@ func assertStatus(t *testing.T, got *httptest.ResponseRecorder, want int) {
 	}
 }
 
-func newRegisterRequest(name string, addr net.TCPAddr, position string) *http.Request {
+func newRegisterRequest(name string, addr net.TCPAddr) *http.Request {
 	request, _ := http.NewRequest(http.MethodPost, "/register", nil)
 	params := url.Values{}
 	params.Set("name", name)
 	params.Set("host", addr.IP.String())
 	params.Set("port", strconv.Itoa(addr.Port))
-	params.Set("position", position)
 	request.Form = params
 	return request
 }
 
-func newQueryRequest(name string, position string) *http.Request {
+func newQueryRequest(name string, mode string) *http.Request {
 	request, _ := http.NewRequest(http.MethodPost, "/query", nil)
 	params := url.Values{}
 	params.Set("name", name)
-	params.Set("position", position)
+	params.Set("mode", mode)
 	request.Form = params
 	return request
 }

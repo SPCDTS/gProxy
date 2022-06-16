@@ -16,18 +16,17 @@ import (
 )
 
 type portProxy struct {
-	Client net.TCPAddr
-	Server net.TCPAddr
-	done   chan interface{}
+	Server    net.TCPAddr
+	ProxyPort int
+	done      chan interface{}
 }
 
 func addrReady(addr net.TCPAddr) bool {
 	return addr.IP != nil && addr.Port != 0
 }
 
-// 两组地址都设置
 func (p portProxy) Ready() bool {
-	return addrReady(p.Client) && addrReady(p.Server)
+	return addrReady(p.Server)
 }
 
 // 通过判断done channel是否打开来确定是否正在进行转发

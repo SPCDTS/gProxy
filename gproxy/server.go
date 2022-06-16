@@ -38,6 +38,7 @@ func (p *ProxyServer) tcpListen(name string) string {
 		fmt.Println(err)
 		return ""
 	}
+	proxy.ProxyPort = ln.Addr().(*net.TCPAddr).Port
 
 	log.Printf("正在侦听: %s\n", ln.Addr().String())
 
@@ -110,19 +111,13 @@ func (p *ProxyServer) tcpHandle(server net.TCPAddr, tcpConn net.Conn) {
 }
 
 // 新增代理对
-func (p *ProxyServer) addProxy(name string, addr net.TCPAddr, position string) {
+func (p *ProxyServer) addProxy(name string, addr net.TCPAddr) {
 	proxyPair, ok := p.proxyDict[name]
 	if !ok {
 		proxyPair = new(portProxy)
 	}
-	switch position {
-	case Client:
-		proxyPair.Client = addr
-	case Server:
-		proxyPair.Server = addr
-	default:
-	}
 
+	proxyPair.Server = addr
 	p.proxyDict[name] = proxyPair
 
 	if proxyPair.Ready() {
@@ -131,23 +126,27 @@ func (p *ProxyServer) addProxy(name string, addr net.TCPAddr, position string) {
 	}
 }
 
-func (p *ProxyServer) match(name string, position string) (dst net.TCPAddr) {
+// 根据名称和mode返回对应的地址
+func (p *ProxyServer) match(name, mode string) (dst net.TCPAddr) {
 	proxyPair, ok := p.proxyDict[name]
-	if ok && proxyPair.Ready() {
-		switch position {
-		case Client:
-			return proxyPair.Client
-		case Server:
-			return proxyPair.Server
-		default:
+	if !ok {
+		return
+	}
+
+	if mode == "direct" {
+		if proxyPair.Ready() {
+			dst = proxyPair.Server
 		}
+	} else {
+		dst.IP = net.ParseIP(p.clientIP)
+		dst.Port = proxyPair.ProxyPort
 	}
 	return
 }
 
 func (p *ProxyServer) Register(w http.ResponseWriter, r *http.Request) {
 	logger.Println("Register")
-	name, addr, position, err := getRegisterParams(r)
+	name, addr, err := getRegisterParams(r)
 	if err != nil {
 		logger.Printf("%v", err)
 		w.WriteHeader(http.StatusBadRequest)
@@ -155,30 +154,25 @@ func (p *ProxyServer) Register(w http.ResponseWriter, r *http.Request) {
 	}
 	// 如果已经有正在进行的连接，则拒绝注册请求
 	if proxy, ok := p.proxyDict[name]; ok {
-		if proxy.Ready() && proxy.done != nil {
-			select {
-			case _, open := <-proxy.done:
-				if open {
-					w.WriteHeader(http.StatusBadRequest)
-					return
-				}
-			default:
-			}
+		if proxy.Running() {
+			w.WriteHeader(http.StatusBadRequest)
+			return
 		}
 	}
-	p.addProxy(name, addr, position)
+
+	p.addProxy(name, addr)
 	w.WriteHeader(http.StatusAccepted)
-	fmt.Printf("Register [%s-%s]: %s\n", name, position, addr.String())
+	fmt.Printf("Register [%s]: %s\n", name, addr.String())
 }
 
 func (p *ProxyServer) Query(w http.ResponseWriter, r *http.Request) {
 	logger.Println("Query")
-	name, position, err := getQueryParams(r)
+	name, mode, err := getQueryParams(r)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	result_addr := p.match(name, position)
+	result_addr := p.match(name, mode)
 	json.NewEncoder(w).Encode(result_addr)
 	w.Header().Set("Content-Type", jsonContentType)
 	w.WriteHeader(http.StatusOK)
@@ -205,15 +199,10 @@ func (p *ProxyServer) Forwarding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if proxy.done != nil {
-		select {
-		case _, open := <-proxy.done:
-			if open {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-		default:
-		}
+	if proxy.Running() {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Already forwarding"))
+		return
 	}
 
 	proxy.done = make(chan interface{})
@@ -231,12 +220,11 @@ func (p *ProxyServer) StopForwarding(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func getRegisterParams(r *http.Request) (name string, addr net.TCPAddr, position string, err error) {
+func getRegisterParams(r *http.Request) (name string, addr net.TCPAddr, err error) {
 	r.ParseForm()
 	name = r.Form.Get("name")
 	host := r.Form.Get("host")
 	port, err := strconv.Atoi(r.Form.Get("port"))
-	position = r.Form.Get("position")
 
 	addr = net.TCPAddr{
 		IP:   net.ParseIP(host),
@@ -245,10 +233,10 @@ func getRegisterParams(r *http.Request) (name string, addr net.TCPAddr, position
 	return
 }
 
-func getQueryParams(r *http.Request) (name string, position string, err error) {
+func getQueryParams(r *http.Request) (name string, mode string, err error) {
 	r.ParseForm()
 	name = r.Form.Get("name")
-	position = r.Form.Get("position")
+	mode = r.Form.Get("mode")
 	return
 }
 

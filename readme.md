@@ -15,15 +15,17 @@
 ## 使用
 
 * /register
-    * 注册客户端或服务端，携带form-data，包含以下字段
+    * 注册服务端，携带form-data，包含以下字段
     * name
     * host
     * port
-    * position
 
 * /query
-    * 用于内网直连，查询对端ip与端口
-    * name, position
+    * 携带参数:
+        * mode
+            * mode="direct"表示直连, 将返回对端IP和端口
+            * mode="proxy"表示代理, 将返回代理服务器IP和端口
+        * name
 
 * /forwarding
     * 开始转发，代理服务器将开始侦听客户端端口
