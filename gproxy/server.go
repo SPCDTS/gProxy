@@ -64,7 +64,7 @@ func (p *ProxyServer) tcpListen(name string) string {
 
 // 处理建立的连接
 func (p *ProxyServer) tcpHandle(server *net.TCPAddr, tcpConn net.Conn) {
-	fmt.Println("[tcpListen] incoming connection: ", tcpConn.RemoteAddr().String())
+	//fmt.Println("[tcpListen] incoming connection: ", tcpConn.RemoteAddr().String())
 	remote_tcp, err := ConnectRemote(5*time.Second, localIP, server, p.proxyMinPort, p.proxyMaxPort, 5)
 	if err != nil {
 		fmt.Printf("无法连接至目标服务器: %s\n", err)
@@ -78,24 +78,15 @@ func (p *ProxyServer) tcpHandle(server *net.TCPAddr, tcpConn net.Conn) {
 
 	go func() {
 		defer tcpConn.Close()
-		defer fmt.Println("Client closed")
 		defer remote_tcp.Close()
-		defer fmt.Println("Server closed")
-		fmt.Printf("proxy-server:%s <-- %s == %s <-- %s\n", remote_tcp.RemoteAddr(), remote_tcp.LocalAddr(), tcpConn.LocalAddr(), tcpConn.RemoteAddr())
-		io.Copy(remote_tcp, tcpConn)
-		//handleConnection(remote_tcp, tcpConn)
+		io.Copy(tcpConn, remote_tcp)
 	}()
 
 	go func() {
 		defer tcpConn.Close()
-		defer fmt.Println("Client closed")
 		defer remote_tcp.Close()
-		defer fmt.Println("Server closed")
-		fmt.Printf("proxy-server:%s --> %s == %s --> %s\n", remote_tcp.RemoteAddr(), remote_tcp.LocalAddr(), tcpConn.LocalAddr(), tcpConn.RemoteAddr())
-		io.Copy(tcpConn, remote_tcp)
-		//handleConnection(tcpConn, remote_tcp)
+		io.Copy(remote_tcp, tcpConn)
 	}()
-
 }
 
 // 新增代理对
@@ -185,7 +176,6 @@ func (p *ProxyServer) Forwarding(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Already forwarding"))
 		return
 	}
-
 	proxy.done = make(chan interface{})
 	proxyAddr := p.tcpListen(name)
 	w.WriteHeader(http.StatusOK)
@@ -197,7 +187,10 @@ func (p *ProxyServer) StopForwarding(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	name := r.Form.Get("name")
 	proxy := p.proxyDict[name]
-	close(proxy.done)
+	if proxy != nil && proxy.done != nil {
+		close(proxy.done)
+		proxy.done = nil
+	}
 	w.WriteHeader(http.StatusOK)
 }
 

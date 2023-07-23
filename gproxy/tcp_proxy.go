@@ -24,6 +24,7 @@ type PortProxy struct {
 func NewPortProxy(server *net.TCPAddr) *PortProxy {
 	return &PortProxy{
 		Server: server,
+		done:   make(chan interface{}),
 	}
 }
 
@@ -49,27 +50,16 @@ func getPort(minP, maxP int) (port int) {
 // 连接至目标服务器
 func ConnectRemote(timeout time.Duration, localIP string, remoteAddress net.Addr, minP, maxP int, maxTry int) (net.Conn, error) {
 	for i := 0; i < maxTry; i++ {
-		for j := 0; j < 5; j++ {
-			localAddr := net.TCPAddr{
-				IP:   net.ParseIP(localIP),
-				Port: getPort(minP, maxP),
-			}
-			d := net.Dialer{
-				Timeout:   timeout,
-				LocalAddr: &localAddr,
-			}
-			fmt.Printf("[ConnectRemote] 正在进行第<%d>次尝试，使用:%s\n", j+1, &localAddr)
-			if remote_tcp, err := d.Dial("tcp", remoteAddress.String()); err == nil {
-				return remote_tcp, nil
-			} else {
-				fmt.Printf("[ConnectRemote] 无法连接:%s\n", err.Error())
-			}
+		d := net.Dialer{
+			Timeout: timeout,
 		}
-		fmt.Println("[ConnectRemote] 正在退避")
-		time.Sleep(time.Duration(rand.Int63n(5)) * time.Second) // 找不到就先退避
+		if remote_tcp, err := d.Dial("tcp", remoteAddress.String()); err == nil {
+			return remote_tcp, nil
+		} else {
+			fmt.Printf("[ConnectRemote] 无法连接:%s\n", err.Error())
+		}
 	}
-
-	return nil, errors.New("[ConnectRemote] 无空闲端口，无法建立连接")
+	return nil, errors.New("[ConnectRemote] 无法建立连接")
 }
 
 func ListenClient(ip string, minP, maxP int, maxTry int) (net.Listener, error) {

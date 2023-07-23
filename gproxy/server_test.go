@@ -113,8 +113,8 @@ func TestRegister(t *testing.T) {
 	proxyServer.ServeHTTP(forwardingResponse, forwardingRequest)
 	proxy_addr := forwardingResponse.Body.String()
 	t.Run("测试TCP转发", func(t *testing.T) {
-		for i := 0; i < 1; i++ {
-			ShortConnect(t, proxy_addr, 8082)
+		for i := 0; i < 1000; i++ {
+			ShortConnect(t, proxy_addr)
 		}
 		stopRequest := newStopRequest(name)
 		proxyServer.ServeHTTP(httptest.NewRecorder(), stopRequest)
@@ -216,12 +216,9 @@ func EchoServer(server_addr string) {
 		}
 	}()
 }
-func ShortConnect(t *testing.T, proxy_addr string, client_port int) {
+func ShortConnect(t *testing.T, proxy_addr string) {
 	d := net.Dialer{
 		Timeout: 5 * time.Second,
-		LocalAddr: &net.TCPAddr{
-			Port: client_port,
-		},
 	}
 	var proxy_cnn net.Conn
 	var err error
@@ -241,4 +238,8 @@ func ShortConnect(t *testing.T, proxy_addr string, client_port int) {
 	}
 	fmt.Printf("[ShortConnect] total RW bytes: %d\n", total)
 	proxy_cnn.Close()
+}
+
+func BenchmarkXxx(b *testing.B) {
+
 }
