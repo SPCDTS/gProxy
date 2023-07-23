@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"fmt"
 	"math/rand"
 	"net"
 	"os"
@@ -15,23 +15,21 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type portProxy struct {
-	Server    net.TCPAddr
-	ProxyPort int
-	done      chan interface{}
+type PortProxy struct {
+	Server *net.TCPAddr
+	lcp    int // listen client port, proxy server在这个端口侦听client的连接
+	done   chan interface{}
 }
 
-func addrReady(addr net.TCPAddr) bool {
-	return addr.IP != nil && addr.Port != 0
-}
-
-func (p portProxy) Ready() bool {
-	return addrReady(p.Server)
+func NewPortProxy(server *net.TCPAddr) *PortProxy {
+	return &PortProxy{
+		Server: server,
+	}
 }
 
 // 通过判断done channel是否打开来确定是否正在进行转发
-func (p portProxy) Running() bool {
-	if p.Ready() && p.done != nil {
+func (p PortProxy) Running() bool {
+	if p.done != nil {
 		select {
 		case _, open := <-p.done:
 			if open {
@@ -48,7 +46,8 @@ func getPort(minP, maxP int) (port int) {
 	return
 }
 
-func CustomConn(timeout time.Duration, localIP string, remoteAddress net.Addr, minP, maxP int, maxTry int) (net.Conn, error) {
+// 连接至目标服务器
+func ConnectRemote(timeout time.Duration, localIP string, remoteAddress net.Addr, minP, maxP int, maxTry int) (net.Conn, error) {
 	for i := 0; i < maxTry; i++ {
 		for j := 0; j < 5; j++ {
 			localAddr := net.TCPAddr{
@@ -59,39 +58,39 @@ func CustomConn(timeout time.Duration, localIP string, remoteAddress net.Addr, m
 				Timeout:   timeout,
 				LocalAddr: &localAddr,
 			}
-			log.Printf("正在进行第<%d>次尝试，使用:%s", j+1, &localAddr)
+			fmt.Printf("[ConnectRemote] 正在进行第<%d>次尝试，使用:%s\n", j+1, &localAddr)
 			if remote_tcp, err := d.Dial("tcp", remoteAddress.String()); err == nil {
 				return remote_tcp, nil
 			} else {
-				log.Printf("无法连接:%s\n", err.Error())
+				fmt.Printf("[ConnectRemote] 无法连接:%s\n", err.Error())
 			}
 		}
-		log.Println("正在退避")
+		fmt.Println("[ConnectRemote] 正在退避")
 		time.Sleep(time.Duration(rand.Int63n(5)) * time.Second) // 找不到就先退避
 	}
 
-	return nil, errors.New("无空闲端口，无法建立连接")
+	return nil, errors.New("[ConnectRemote] 无空闲端口，无法建立连接")
 }
 
-func CustomListen(ip string, minP, maxP int, maxTry int) (net.Listener, error) {
+func ListenClient(ip string, minP, maxP int, maxTry int) (net.Listener, error) {
 	lc := ReuseConfig()
 	for i := 0; i < maxTry; i++ {
 		for j := 0; j < 5; j++ {
 			port := getPort(minP, maxP)
 			address := ip + ":" + strconv.Itoa(port)
-			log.Printf("正在进行第<%d>次尝试，使用:%s", j+1, address)
+			fmt.Printf("[ListenClient] 正在进行第<%d>次尝试，使用:%s\n", j+1, address)
 			ln, err := lc.Listen(context.Background(), "tcp", address) // 监听Client端口
 			if err == nil {
 				return ln, nil
 			} else {
-				log.Printf("无法连接:%s\n", err.Error())
+				fmt.Printf("[ListenClient] 无法连接:%s\n", err.Error())
 			}
 
 		}
-		log.Println("正在退避")
+		fmt.Println("[ListenClient] 正在退避")
 		time.Sleep(time.Duration(rand.Int63n(5)) * time.Second) // 找不到就先退避
 	}
-	return nil, errors.New("无空闲端口，无法监听客户端连接")
+	return nil, errors.New("[ListenClient] 无空闲端口，无法监听客户端连接")
 }
 
 func ReuseConfig() net.ListenConfig {
@@ -106,23 +105,23 @@ func ReuseConfig() net.ListenConfig {
 	return cfg
 }
 
-const dataFile = "../proxyEntry.json"
+const dataFile = "/app/proxyEntry.json"
 
-func Map2File(dic map[string]*portProxy) (err error) {
+func Map2File(dic map[string]*PortProxy) (err error) {
 	fPtr, err := os.Create(dataFile)
 
 	if err != nil {
 		return
 	}
 
-	log.Printf("正在写入: %s\n", dataFile)
+	fmt.Printf("正在写入: %s\n", dataFile)
 	defer fPtr.Close()
 	encoder := json.NewEncoder(fPtr)
 	err = encoder.Encode(dic)
 	return
 }
 
-func File2Map(dic *map[string]*portProxy) (err error) {
+func File2Map(dic *map[string]*PortProxy) (err error) {
 	fPtr, err := os.Open(dataFile)
 	if err != nil {
 		return

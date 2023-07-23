@@ -1,19 +1,19 @@
 package gproxy
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"g-proxy/utils"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestReuse(t *testing.T) {
@@ -56,9 +56,9 @@ func TestReuse(t *testing.T) {
 }
 
 func TestJson(t *testing.T) {
-	dic := map[string]*portProxy{
+	dic := map[string]*PortProxy{
 		"test": {
-			Server: net.TCPAddr{
+			Server: &net.TCPAddr{
 				IP:   net.ParseIP("11.11.11.22"),
 				Port: 1002,
 			},
@@ -66,15 +66,15 @@ func TestJson(t *testing.T) {
 	}
 	err := Map2File(dic)
 
-	dic["gitlab"] = &portProxy{
-		Server: net.TCPAddr{
+	dic["gitlab"] = &PortProxy{
+		Server: &net.TCPAddr{
 			IP:   net.ParseIP("11.11.222.22"),
 			Port: 1111,
 		},
 	}
 	Map2File(dic)
 	t.Log(err)
-	dic2 := make(map[string]*portProxy)
+	dic2 := make(map[string]*PortProxy)
 	err = File2Map(&dic2)
 	if err != nil {
 		t.Log(err)
@@ -91,86 +91,51 @@ func TestRegister(t *testing.T) {
 
 	name := "test"
 	proxyServer := NewProxyServer()
-
+	EchoServer(addr1.String())
 	t.Run("注册1个地址,并查询它", func(t *testing.T) {
 
 		request_1 := newRegisterRequest(name, addr1)
 		response_1 := httptest.NewRecorder()
 		proxyServer.ServeHTTP(response_1, request_1)
 		assertStatus(t, response_1, http.StatusAccepted)
-		assertProxyPair(t, proxyServer.proxyDict[name].Server, addr1)
+		assertProxyPair(t, proxyServer.proxyDict[name].Server, &addr1)
 
 		query_request := newQueryRequest(name, "direct")
 		query_response := httptest.NewRecorder()
 		proxyServer.ServeHTTP(query_response, query_request)
 		assertStatus(t, query_response, http.StatusOK)
 		result_addr := getQueryBody(t, query_response)
-		assertProxyPair(t, *result_addr, addr1)
+		assertProxyPair(t, result_addr, &addr1)
 	})
 
 	forwardingRequest := newForwardingRequest(name)
 	forwardingResponse := httptest.NewRecorder()
 	proxyServer.ServeHTTP(forwardingResponse, forwardingRequest)
-	client_address := forwardingResponse.Body.String()
+	proxy_addr := forwardingResponse.Body.String()
 	t.Run("测试TCP转发", func(t *testing.T) {
-		// go proxyServer.tcpListen(name)
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			d := net.Dialer{
-				Timeout: 5 * time.Second,
-				LocalAddr: &net.TCPAddr{
-					Port: 8001,
-				},
-			}
-
-			var client_cnn net.Conn
-
-			for {
-				var err error
-				client_cnn, err = d.Dial("tcp", client_address) // 尝试从8001端口连接客户端端口
-				if err == nil {
-					break
-				}
-			}
-
-			var i int32
-			for i = 0; i < 5; i++ {
-				bytesBuffer := bytes.NewBuffer([]byte{})
-				time.Sleep(1 * time.Second)
-				binary.Write(bytesBuffer, binary.BigEndian, i)
-				n, _ := client_cnn.Write(bytesBuffer.Bytes())
-
-				fmt.Printf("client: %d, %d bytes\n", i, n)
-			}
-			client_cnn.Close()
-			fmt.Println("client: close client->proxy connection")
-		}()
-
-		server_address := addr1
-		go func() {
-			defer wg.Done()
-			server_ln, _ := net.Listen("tcp", server_address.String())
-			server_conn, _ := server_ln.Accept()
-			fmt.Println(server_conn.RemoteAddr())
-			buf := make([]byte, 4096)
-			for {
-				n, err := server_conn.Read(buf)
-				if n == 0 || err != nil {
-					server_conn.Close()
-					break
-				}
-				fmt.Printf("server: %d, %d bytes\n", bytes2Int(buf[0:n]), n)
-			}
-		}()
-		wg.Wait()
+		for i := 0; i < 1; i++ {
+			ShortConnect(t, proxy_addr, 8082)
+		}
 		stopRequest := newStopRequest(name)
 		proxyServer.ServeHTTP(httptest.NewRecorder(), stopRequest)
 	})
 }
 
-func assertProxyPair(t *testing.T, addr net.TCPAddr, target_addr net.TCPAddr) {
+func TestProxy(t *testing.T) {
+	proxyServer := NewProxyServer()
+	dic := map[string]*PortProxy{
+		"test": {
+			Server: &net.TCPAddr{
+				IP:   net.ParseIP("127.0.0.1"),
+				Port: 4321,
+			},
+		},
+	}
+	proxyServer.proxyDict = dic
+
+}
+
+func assertProxyPair(t *testing.T, addr *net.TCPAddr, target_addr *net.TCPAddr) {
 	t.Helper()
 	if addr.String() != target_addr.String() {
 		t.Errorf("go %v, want %v", addr, target_addr)
@@ -228,8 +193,52 @@ func getQueryBody(t *testing.T, response *httptest.ResponseRecorder) (addr *net.
 	return
 }
 
-func bytes2Int(buffer []byte) int {
-	var x int32
-	binary.Read(bytes.NewBuffer(buffer), binary.BigEndian, &x)
-	return int(x)
+func EchoServer(server_addr string) {
+	server_ln, err := net.Listen("tcp", server_addr)
+	if err != nil {
+		panic(err)
+	}
+	go func() {
+		for {
+			server_conn, _ := server_ln.Accept()
+			buf := make([]byte, 4096)
+			go func() {
+				fmt.Println("[Echo Server] incoming connection: ", server_conn.RemoteAddr().String())
+				defer server_conn.Close()
+				for {
+					nr, err := server_conn.Read(buf)
+					if err != nil {
+						return
+					}
+					server_conn.Write(buf[:nr])
+				}
+			}()
+		}
+	}()
+}
+func ShortConnect(t *testing.T, proxy_addr string, client_port int) {
+	d := net.Dialer{
+		Timeout: 5 * time.Second,
+		LocalAddr: &net.TCPAddr{
+			Port: client_port,
+		},
+	}
+	var proxy_cnn net.Conn
+	var err error
+	proxy_cnn, err = d.Dial("tcp", proxy_addr) // 连接至代理服务器
+	assert.Nil(t, err)
+	readBuf := make([]byte, 1024)
+	writeS := utils.RandString(100)
+	writeBytes := []byte(writeS)
+	total := 0
+	for i := 0; i < 100; i++ {
+		_, err = proxy_cnn.Write(writeBytes)
+		assert.Nil(t, err)
+		nr, err := proxy_cnn.Read(readBuf)
+		assert.Nil(t, err)
+		assert.Equal(t, writeS, string(readBuf[:nr]))
+		total += nr
+	}
+	fmt.Printf("[ShortConnect] total RW bytes: %d\n", total)
+	proxy_cnn.Close()
 }

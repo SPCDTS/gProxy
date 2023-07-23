@@ -22,7 +22,7 @@ var logger = log.Default()
 
 type ProxyServer struct {
 	http.Handler
-	proxyDict    map[string]*portProxy
+	proxyDict    map[string]*PortProxy
 	clientIP     string
 	serverIP     string
 	proxyMinPort int
@@ -33,16 +33,19 @@ type ProxyServer struct {
 func (p *ProxyServer) tcpListen(name string) string {
 	// heartbeatStream := make(chan interface{}, 1)
 	proxy := p.proxyDict[name]
-	ln, err := CustomListen(p.serverIP, p.proxyMinPort, p.proxyMaxPort, 5)
+	ln, err := ListenClient(p.serverIP, p.proxyMinPort, p.proxyMaxPort, 5)
+	go func() {
+		<-proxy.done
+		ln.Close()
+	}()
 	if err != nil {
 		fmt.Println(err)
 		return ""
 	}
-	proxy.ProxyPort = ln.Addr().(*net.TCPAddr).Port
+	proxy.lcp = ln.Addr().(*net.TCPAddr).Port
 
 	log.Printf("正在侦听: %s\n", ln.Addr().String())
 
-	cnn_chan := make(chan net.Conn, 1)
 	// 新建一个goroutine去不断地侦听端口，当ln被close的时候，会退出
 	go func() {
 		for {
@@ -51,33 +54,18 @@ func (p *ProxyServer) tcpListen(name string) string {
 				fmt.Printf("停止接收连接: %s\n", err)
 				return
 			}
-			cnn_chan <- tcp_Conn
-		}
-	}()
-
-	go func() {
-		defer ln.Close()
-		for {
-			select {
-			case tcp_Conn := <-cnn_chan:
-				go p.tcpHandle(proxy.Server, tcp_Conn) //创建新的协程进行转发
-			case <-proxy.done:
-				close(cnn_chan)
-				fmt.Println("proxy server: close client connection.")
-				return
-			}
+			go p.tcpHandle(proxy.Server, tcp_Conn) //创建新的协程进行转发
 		}
 	}()
 
 	// 返回绑定的地址
 	return ln.Addr().String()
-
 }
 
 // 处理建立的连接
-func (p *ProxyServer) tcpHandle(server net.TCPAddr, tcpConn net.Conn) {
-
-	remote_tcp, err := CustomConn(5*time.Second, localIP, &server, p.proxyMinPort, p.proxyMaxPort, 5)
+func (p *ProxyServer) tcpHandle(server *net.TCPAddr, tcpConn net.Conn) {
+	fmt.Println("[tcpListen] incoming connection: ", tcpConn.RemoteAddr().String())
+	remote_tcp, err := ConnectRemote(5*time.Second, localIP, server, p.proxyMinPort, p.proxyMaxPort, 5)
 	if err != nil {
 		fmt.Printf("无法连接至目标服务器: %s\n", err)
 		if remote_tcp != nil {
@@ -111,35 +99,28 @@ func (p *ProxyServer) tcpHandle(server net.TCPAddr, tcpConn net.Conn) {
 }
 
 // 新增代理对
-func (p *ProxyServer) addProxy(name string, addr net.TCPAddr) {
+func (p *ProxyServer) addProxy(name string, addr *net.TCPAddr) {
 	proxyPair, ok := p.proxyDict[name]
 	if !ok {
-		proxyPair = new(portProxy)
+		proxyPair = NewPortProxy(addr)
+		p.proxyDict[name] = proxyPair
 	}
-
 	proxyPair.Server = addr
-	p.proxyDict[name] = proxyPair
-
-	if proxyPair.Ready() {
-		// 在代理对的客户端和服务端都准备好时落盘
-		Map2File(p.proxyDict)
-	}
+	Map2File(p.proxyDict)
 }
 
 // 根据名称和mode返回对应的地址
-func (p *ProxyServer) match(name, mode string) (dst net.TCPAddr) {
+func (p *ProxyServer) match(name, mode string) (dst *net.TCPAddr) {
 	proxyPair, ok := p.proxyDict[name]
 	if !ok {
 		return
 	}
 
 	if mode == "direct" {
-		if proxyPair.Ready() {
-			dst = proxyPair.Server
-		}
+		dst = proxyPair.Server
 	} else {
 		dst.IP = net.ParseIP(p.clientIP)
-		dst.Port = proxyPair.ProxyPort
+		dst.Port = proxyPair.lcp
 	}
 	return
 }
@@ -178,7 +159,7 @@ func (p *ProxyServer) Query(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// 开始转发时，会返回代理服务器所侦听的客户端的端口
+// 开始转发时，会返回代理服务器侦听客户端的端口
 func (p *ProxyServer) Forwarding(w http.ResponseWriter, r *http.Request) {
 	logger.Println("Forwarding")
 	r.ParseForm()
@@ -194,7 +175,7 @@ func (p *ProxyServer) Forwarding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !proxy.Ready() {
+	if proxy.Server == nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -220,13 +201,13 @@ func (p *ProxyServer) StopForwarding(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func getRegisterParams(r *http.Request) (name string, addr net.TCPAddr, err error) {
+func getRegisterParams(r *http.Request) (name string, addr *net.TCPAddr, err error) {
 	r.ParseForm()
 	name = r.Form.Get("name")
 	host := r.Form.Get("host")
 	port, err := strconv.Atoi(r.Form.Get("port"))
 
-	addr = net.TCPAddr{
+	addr = &net.TCPAddr{
 		IP:   net.ParseIP(host),
 		Port: port,
 	}
@@ -242,7 +223,7 @@ func getQueryParams(r *http.Request) (name string, mode string, err error) {
 
 func NewProxyServer() *ProxyServer {
 	p := new(ProxyServer)
-	p.proxyDict = make(map[string]*portProxy)
+	p.proxyDict = make(map[string]*PortProxy)
 	File2Map(&p.proxyDict)
 
 	router := http.NewServeMux()
