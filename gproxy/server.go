@@ -3,6 +3,7 @@ package gproxy
 import (
 	"encoding/json"
 	"fmt"
+	"g-proxy/utils"
 	"io"
 	"log"
 	"net"
@@ -27,6 +28,7 @@ type ProxyServer struct {
 	serverIP     string
 	proxyMinPort int
 	proxyMaxPort int
+	gpoll        *utils.GoPool
 }
 
 // 侦听对应代理服务的端口
@@ -47,16 +49,16 @@ func (p *ProxyServer) tcpListen(name string) string {
 	log.Printf("正在侦听: %s\n", ln.Addr().String())
 
 	// 新建一个goroutine去不断地侦听端口，当ln被close的时候，会退出
-	go func() {
+	p.gpoll.Go(func() {
 		for {
 			tcp_Conn, err := ln.Accept()
 			if err != nil {
 				fmt.Printf("停止接收连接: %s\n", err)
 				return
 			}
-			go p.tcpHandle(proxy.Server, tcp_Conn) //创建新的协程进行转发
+			p.gpoll.Go(func() { p.tcpHandle(proxy.Server, tcp_Conn) }) //创建新的协程进行转发
 		}
-	}()
+	})
 
 	// 返回绑定的地址
 	return ln.Addr().String()
@@ -76,17 +78,17 @@ func (p *ProxyServer) tcpHandle(server *net.TCPAddr, tcpConn net.Conn) {
 		return
 	}
 
-	go func() {
+	p.gpoll.Go(func() {
 		defer tcpConn.Close()
 		defer remote_tcp.Close()
 		io.Copy(tcpConn, remote_tcp)
-	}()
+	})
 
-	go func() {
+	p.gpoll.Go(func() {
 		defer tcpConn.Close()
 		defer remote_tcp.Close()
 		io.Copy(remote_tcp, tcpConn)
-	}()
+	})
 }
 
 // 新增代理对
@@ -216,6 +218,7 @@ func getQueryParams(r *http.Request) (name string, mode string, err error) {
 
 func NewProxyServer() *ProxyServer {
 	p := new(ProxyServer)
+	p.gpoll = utils.NewGoPool(64, 32, 1024)
 	p.proxyDict = make(map[string]*PortProxy)
 	File2Map(&p.proxyDict)
 
