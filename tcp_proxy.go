@@ -1,16 +1,11 @@
 package gproxy
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"os"
-	"strconv"
 	"syscall"
-	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -40,47 +35,6 @@ func (p PortProxy) Running() bool {
 		}
 	}
 	return false
-}
-
-func getPort(minP, maxP int) (port int) {
-	port = minP + rand.Intn(maxP-minP+1)
-	return
-}
-
-// 连接至目标服务器
-func ConnectRemote(timeout time.Duration, localIP string, remoteAddress net.Addr, minP, maxP int, maxTry int) (net.Conn, error) {
-	for i := 0; i < maxTry; i++ {
-		d := net.Dialer{
-			Timeout: timeout,
-		}
-		if remote_tcp, err := d.Dial("tcp", remoteAddress.String()); err == nil {
-			return remote_tcp, nil
-		} else {
-			fmt.Printf("[ConnectRemote] 无法连接:%s\n", err.Error())
-		}
-	}
-	return nil, errors.New("[ConnectRemote] 无法建立连接")
-}
-
-func ListenClient(ip string, minP, maxP int, maxTry int) (net.Listener, error) {
-	lc := ReuseConfig()
-	for i := 0; i < maxTry; i++ {
-		for j := 0; j < 5; j++ {
-			port := getPort(minP, maxP)
-			address := ip + ":" + strconv.Itoa(port)
-			fmt.Printf("[ListenClient] 正在进行第<%d>次尝试，使用:%s\n", j+1, address)
-			ln, err := lc.Listen(context.Background(), "tcp", address) // 监听Client端口
-			if err == nil {
-				return ln, nil
-			} else {
-				fmt.Printf("[ListenClient] 无法连接:%s\n", err.Error())
-			}
-
-		}
-		fmt.Println("[ListenClient] 正在退避")
-		time.Sleep(time.Duration(rand.Int63n(5)) * time.Second) // 找不到就先退避
-	}
-	return nil, errors.New("[ListenClient] 无空闲端口，无法监听客户端连接")
 }
 
 func ReuseConfig() net.ListenConfig {

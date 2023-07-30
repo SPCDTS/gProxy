@@ -1,11 +1,14 @@
 package gproxy
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"g-proxy/utils"
 	"io"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"strconv"
@@ -31,11 +34,47 @@ type ProxyServer struct {
 	gpoll        *utils.GoPool
 }
 
+func (p *ProxyServer) ListenClient(maxTry int) (net.Listener, error) {
+	lc := ReuseConfig()
+	for i := 0; i < maxTry; i++ {
+		for j := 0; j < 5; j++ {
+			port := getPort(p.proxyMinPort, p.proxyMaxPort)
+			address := p.serverIP + ":" + strconv.Itoa(port)
+			fmt.Printf("[ListenClient] 正在进行第<%d>次尝试，使用:%s\n", j+1, address)
+			ln, err := lc.Listen(context.Background(), "tcp", address) // 监听Client端口
+			if err == nil {
+				return ln, nil
+			} else {
+				fmt.Printf("[ListenClient] 无法连接:%s\n", err.Error())
+			}
+
+		}
+		fmt.Println("[ListenClient] 正在退避")
+		time.Sleep(time.Duration(rand.Int63n(5)) * time.Second) // 找不到就先退避
+	}
+	return nil, errors.New("[ListenClient] 无空闲端口，无法监听客户端连接")
+}
+
+// 连接至目标服务器
+func ConnectRemote(timeout time.Duration, remoteAddress net.Addr, maxTry int) (net.Conn, error) {
+	for i := 0; i < maxTry; i++ {
+		d := net.Dialer{
+			Timeout: timeout,
+		}
+		if remote_tcp, err := d.Dial("tcp", remoteAddress.String()); err == nil {
+			return remote_tcp, nil
+		} else {
+			fmt.Printf("[ConnectRemote] 无法连接:%s\n", err.Error())
+		}
+	}
+	return nil, errors.New("[ConnectRemote] 无法建立连接")
+}
+
 // 侦听对应代理服务的端口
 func (p *ProxyServer) tcpListen(name string) string {
 	// heartbeatStream := make(chan interface{}, 1)
 	proxy := p.proxyDict[name]
-	ln, err := ListenClient(p.serverIP, p.proxyMinPort, p.proxyMaxPort, 5)
+	ln, err := p.ListenClient(5)
 	go func() {
 		<-proxy.done
 		ln.Close()
@@ -67,7 +106,7 @@ func (p *ProxyServer) tcpListen(name string) string {
 // 处理建立的连接
 func (p *ProxyServer) tcpHandle(server *net.TCPAddr, tcpConn net.Conn) {
 	//fmt.Println("[tcpListen] incoming connection: ", tcpConn.RemoteAddr().String())
-	remote_tcp, err := ConnectRemote(5*time.Second, localIP, server, p.proxyMinPort, p.proxyMaxPort, 5)
+	remote_tcp, err := ConnectRemote(5*time.Second, server, 5)
 	if err != nil {
 		fmt.Printf("无法连接至目标服务器: %s\n", err)
 		if remote_tcp != nil {
@@ -234,4 +273,9 @@ func NewProxyServer() *ProxyServer {
 	p.proxyMinPort = startPort
 	p.proxyMaxPort = endPort
 	return p
+}
+
+func getPort(minP, maxP int) (port int) {
+	port = minP + rand.Intn(maxP-minP+1)
+	return
 }
