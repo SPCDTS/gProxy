@@ -1,4 +1,4 @@
-package io
+package epio
 
 import (
 	"sync"

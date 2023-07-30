@@ -1,4 +1,4 @@
-package io
+package epio
 
 // Options provides all optional parameters within the framework
 type Options struct {

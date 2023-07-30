@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	epio "g-proxy/epio"
 	"g-proxy/utils"
 	"io"
 	"log"
@@ -32,6 +33,9 @@ type ProxyServer struct {
 	proxyMinPort int
 	proxyMaxPort int
 	gpoll        *utils.GoPool
+	forAccept    *epio.Reactor
+	forNewFd     *epio.Reactor
+	forConn      *epio.Connector
 }
 
 func (p *ProxyServer) ListenClient(maxTry int) (net.Listener, error) {
@@ -72,7 +76,7 @@ func ConnectRemote(timeout time.Duration, remoteAddress net.Addr, maxTry int) (n
 
 // 侦听对应代理服务的端口
 func (p *ProxyServer) tcpListen(name string) string {
-	// heartbeatStream := make(chan interface{}, 1)
+
 	proxy := p.proxyDict[name]
 	ln, err := p.ListenClient(5)
 	go func() {
@@ -257,6 +261,30 @@ func getQueryParams(r *http.Request) (name string, mode string, err error) {
 
 func NewProxyServer() *ProxyServer {
 	p := new(ProxyServer)
+	forAccept, err := epio.NewReactor(
+		epio.EvDataArrSize(0), // default val
+		epio.EvPollNum(1),
+		epio.EvReadyNum(8), // only accept fd
+	)
+	if err != nil {
+		panic(err.Error())
+	}
+	forNewFd, err := epio.NewReactor(
+		epio.EvDataArrSize(0), // default val
+		epio.EvPollNum(1),
+		epio.EvReadyNum(512), // auto calc
+	)
+	if err != nil {
+		panic(err.Error())
+	}
+	forConn, err := epio.NewConnector(forNewFd)
+	if err != nil {
+		panic(err.Error())
+	}
+	p.forAccept = forAccept
+	p.forNewFd = forNewFd
+	p.forConn = forConn
+
 	p.gpoll = utils.NewGoPool(64, 32, 1024)
 	p.proxyDict = make(map[string]*PortProxy)
 	File2Map(&p.proxyDict)

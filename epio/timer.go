@@ -1,4 +1,4 @@
-package io
+package epio
 
 type timer interface {
 	schedule(eh EvHandler, delay, interval int64) error
