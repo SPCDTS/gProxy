@@ -19,14 +19,14 @@ import (
 
 func TestReuse(t *testing.T) {
 	t.Run("先通配符", func(t *testing.T) {
-		lc1 := ReuseConfig()
+		lc1 := reuseConfig()
 		ln1, err := lc1.Listen(context.Background(), "tcp", "0.0.0.0:11111")
 		if err != nil {
 			t.Fatalf("创建通配绑定出错: %s", err)
 		} else {
 			defer ln1.Close()
 		}
-		lc2 := ReuseConfig()
+		lc2 := reuseConfig()
 		ln2, err := lc2.Listen(context.Background(), "tcp", "172.119.1.2:11111")
 		if err != nil {
 			t.Logf("创建特定绑定出错: %s", err)
@@ -37,7 +37,7 @@ func TestReuse(t *testing.T) {
 	})
 
 	t.Run("后通配符", func(t *testing.T) {
-		lc2 := ReuseConfig()
+		lc2 := reuseConfig()
 		ln2, err := lc2.Listen(context.Background(), "tcp", "172.119.1.2:11111")
 		if err != nil {
 			t.Fatalf("创建特定绑定出错: %s", err)
@@ -45,7 +45,7 @@ func TestReuse(t *testing.T) {
 			defer ln2.Close()
 		}
 
-		lc1 := ReuseConfig()
+		lc1 := reuseConfig()
 		ln1, err := lc1.Listen(context.Background(), "tcp", "0.0.0.0:11111")
 		if err != nil {
 			t.Errorf("创建通配绑定出错: %s", err)

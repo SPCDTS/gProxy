@@ -3,12 +3,17 @@ package gproxy
 import (
 	"encoding/json"
 	"fmt"
+	epio "g-proxy/epio"
+	"log"
 	"net"
 	"os"
+	"strconv"
 	"syscall"
 
 	"golang.org/x/sys/unix"
 )
+
+const dataFile = "/app/proxyEntry.json"
 
 type PortProxy struct {
 	Server *net.TCPAddr
@@ -28,7 +33,43 @@ func (p PortProxy) Running() bool {
 	return p.done != nil
 }
 
-func ReuseConfig() net.ListenConfig {
+// 新增代理对
+func (p *ProxyServer) addProxy(name string, addr *net.TCPAddr) {
+	proxyPair, ok := p.proxyDict[name]
+	if !ok {
+		proxyPair = NewPortProxy(addr)
+		p.proxyDict[name] = proxyPair
+	}
+	proxyPair.Server = addr
+	Map2File(p.proxyDict)
+}
+
+// 侦听对应代理服务的端口
+func (p *ProxyServer) tcpListen(name string) string {
+	proxy := p.proxyDict[name]
+	proxy.lcp = <-p.port
+	addr := localIP + ":" + strconv.Itoa(proxy.lcp)
+
+	acceptor, err := epio.NewAcceptor(p.forAccept, p.forNewFd,
+		func() epio.EvHandler { return NewProxyC(p.connector, proxy.Server.String()) },
+		addr,
+		epio.ListenBacklog(256),
+		epio.SockRcvBufSize(8*1024))
+	if err != nil {
+		return ""
+	}
+	go func() {
+		<-proxy.done
+		close(acceptor.Close)
+		p.port <- proxy.lcp
+		fmt.Println("port " + strconv.Itoa(proxy.lcp) + " returned")
+	}()
+	// 返回绑定的地址
+	log.Printf("正在侦听: %s\n", addr)
+	return addr
+}
+
+func reuseConfig() net.ListenConfig {
 	cfg := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
@@ -39,8 +80,6 @@ func ReuseConfig() net.ListenConfig {
 	}
 	return cfg
 }
-
-const dataFile = "/app/proxyEntry.json"
 
 func Map2File(dic map[string]*PortProxy) (err error) {
 	fPtr, err := os.Create(dataFile)

@@ -34,41 +34,6 @@ type ProxyServer struct {
 	port         chan int
 }
 
-// 侦听对应代理服务的端口
-func (p *ProxyServer) tcpListen(name string) string {
-	proxy := p.proxyDict[name]
-	proxy.lcp = <-p.port
-	addr := localIP + ":" + strconv.Itoa(proxy.lcp)
-
-	acceptor, err := epio.NewAcceptor(p.forAccept, p.forNewFd,
-		func() epio.EvHandler { return NewProxyC(p.connector, proxy.Server.String()) },
-		addr,
-		epio.ListenBacklog(256),
-		epio.SockRcvBufSize(8*1024))
-	if err != nil {
-		return ""
-	}
-	go func() {
-		<-proxy.done
-		close(acceptor.Close)
-		p.port <- proxy.lcp
-	}()
-	// 返回绑定的地址
-	log.Printf("正在侦听: %s\n", addr)
-	return addr
-}
-
-// 新增代理对
-func (p *ProxyServer) addProxy(name string, addr *net.TCPAddr) {
-	proxyPair, ok := p.proxyDict[name]
-	if !ok {
-		proxyPair = NewPortProxy(addr)
-		p.proxyDict[name] = proxyPair
-	}
-	proxyPair.Server = addr
-	Map2File(p.proxyDict)
-}
-
 // 根据名称和mode返回对应的地址
 func (p *ProxyServer) match(name, mode string) (dst *net.TCPAddr) {
 	proxyPair, ok := p.proxyDict[name]
@@ -186,7 +151,7 @@ func getQueryParams(r *http.Request) (name string, mode string, err error) {
 func NewProxyServer() *ProxyServer {
 	p := new(ProxyServer)
 	forAccept, err := epio.NewReactor(
-		epio.EvDataArrSize(0), // default val
+		epio.EvDataArrSize(100),
 		epio.EvPollNum(1),
 		epio.EvReadyNum(8), // only accept fd
 		epio.ReuseAddr(true),
@@ -195,9 +160,9 @@ func NewProxyServer() *ProxyServer {
 		panic(err.Error())
 	}
 	forNewFd, err := epio.NewReactor(
-		epio.EvDataArrSize(0), // default val
+		epio.EvDataArrSize(500),
 		epio.EvPollNum(13),
-		epio.EvReadyNum(512), // auto calc
+		epio.EvReadyNum(512),
 		epio.TimerHeapInitSize(10000),
 		epio.ReuseAddr(true),
 	)
