@@ -106,14 +106,14 @@ func (ep *evPoll) run(wg *sync.WaitGroup) error {
 					continue
 				}
 				if ev.Events&(syscall.EPOLLOUT) != 0 { // MUST before EPOLLIN (e.g. connect)
-					if ed.eh.OnWrite(ed.fd, now) {
+					if !ed.eh.OnWrite(ed.fd, now) {
 						ep.remove(ed.fd) // MUST before OnClose()
 						ed.eh.OnClose(ed.fd)
 						continue
 					}
 				}
 				if ev.Events&(syscall.EPOLLIN) != 0 {
-					if ed.eh.OnRead(ed.fd, ep.evPollSharedBuff, now) {
+					if !ed.eh.OnRead(ed.fd, ep.evPollSharedBuff, now) {
 						ep.remove(ed.fd) // MUST before OnClose()
 						ed.eh.OnClose(ed.fd)
 						continue

@@ -2,6 +2,7 @@ package epio
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -27,14 +28,14 @@ type Acceptor struct {
 	reactor          *Reactor
 	newFdBindReactor *Reactor
 	addr             string
-	buddyAddr        string
+	Close            chan struct{}
 }
 
 // NewAcceptor return an acceptor
 //
 // New socket has been set to non-blocking
 func NewAcceptor(acceptorBindReactor *Reactor, newFdBindReactor *Reactor,
-	newEvHanlderFunc func() EvHandler, addr, buddyAddr string, opts ...Option) (*Acceptor, error) {
+	newEvHanlderFunc func() EvHandler, addr string, opts ...Option) (*Acceptor, error) {
 	evOptions := setOptions(opts...)
 	a := &Acceptor{
 		fd:               -1,
@@ -46,7 +47,7 @@ func NewAcceptor(acceptorBindReactor *Reactor, newFdBindReactor *Reactor,
 		reuseAddr:        evOptions.reuseAddr,
 		reusePort:        evOptions.reusePort,
 		addr:             addr,
-		buddyAddr:        buddyAddr,
+		Close:            make(chan struct{}),
 	}
 	a.loopAcceptTimes = a.listenBacklog / 2
 	if a.loopAcceptTimes < 1 {
@@ -181,7 +182,7 @@ func (a *Acceptor) listen(fd int, sa syscall.Sockaddr) error {
 	return nil
 }
 
-// OnRead handle listner accept event
+// OnRead handle listener accept event
 func (a *Acceptor) OnRead(fd int, evPollSharedBuff []byte, now int64) bool {
 	for i := 0; i < a.loopAcceptTimes; i++ {
 		conn, _, err := syscall.Accept4(a.fd, syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC)
@@ -192,7 +193,6 @@ func (a *Acceptor) OnRead(fd int, evPollSharedBuff []byte, now int64) bool {
 			break
 		}
 		h := a.newEvHanlderFunc()
-		h.SetFd(fd)
 		h.setReactor(a.newFdBindReactor)
 		if !h.OnOpen(conn, now) {
 			h.OnClose(conn)
@@ -204,4 +204,9 @@ func (a *Acceptor) OnRead(fd int, evPollSharedBuff []byte, now int64) bool {
 // OnClose will not happen
 func (a *Acceptor) OnClose(fd int) {
 	syscall.Close(fd)
+	close(a.Close)
+}
+
+func (a *Acceptor) OnConnectFail(err error) {
+	fmt.Println(err.Error())
 }

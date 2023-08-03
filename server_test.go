@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -83,7 +84,7 @@ func TestJson(t *testing.T) {
 
 }
 
-func TestRegister(t *testing.T) {
+func TestProxy(t *testing.T) {
 	addr1 := net.TCPAddr{
 		IP:   net.ParseIP("127.0.0.1"),
 		Port: 8081,
@@ -120,19 +121,47 @@ func TestRegister(t *testing.T) {
 		proxyServer.ServeHTTP(httptest.NewRecorder(), stopRequest)
 	})
 }
-
-func TestProxy(t *testing.T) {
-	proxyServer := NewProxyServer()
-	dic := map[string]*PortProxy{
-		"test": {
-			Server: &net.TCPAddr{
-				IP:   net.ParseIP("127.0.0.1"),
-				Port: 4321,
-			},
-		},
+func TestRemote(t *testing.T) {
+	addr1 := net.TCPAddr{
+		IP:   net.ParseIP("172.19.243.18"),
+		Port: 80,
 	}
-	proxyServer.proxyDict = dic
 
+	name := "test"
+	proxyServer := NewProxyServer()
+
+	request_1 := newRegisterRequest(name, addr1)
+	response_1 := httptest.NewRecorder()
+	proxyServer.ServeHTTP(response_1, request_1)
+	assertStatus(t, response_1, http.StatusAccepted)
+	assertProxyPair(t, proxyServer.proxyDict[name].Server, &addr1)
+
+	query_request := newQueryRequest(name, "direct")
+	query_response := httptest.NewRecorder()
+	proxyServer.ServeHTTP(query_response, query_request)
+	assertStatus(t, query_response, http.StatusOK)
+	result_addr := getQueryBody(t, query_response)
+	assertProxyPair(t, result_addr, &addr1)
+
+	forwardingRequest := newForwardingRequest(name)
+	forwardingResponse := httptest.NewRecorder()
+	proxyServer.ServeHTTP(forwardingResponse, forwardingRequest)
+	proxy_addr := forwardingResponse.Body.String()
+	wg := &sync.WaitGroup{}
+	N := 100
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				_, err := http.Get("http://" + proxy_addr + "/users/sign_in")
+				if err != nil {
+					fmt.Println(err.Error())
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func assertProxyPair(t *testing.T, addr *net.TCPAddr, target_addr *net.TCPAddr) {
@@ -236,7 +265,7 @@ func ShortConnect(t *testing.T, proxy_addr string) {
 		assert.Equal(t, writeS, string(readBuf[:nr]))
 		total += nr
 	}
-	fmt.Printf("[ShortConnect] total RW bytes: %d\n", total)
+	//fmt.Printf("[ShortConnect] total RW bytes: %d\n", total)
 	proxy_cnn.Close()
 }
 

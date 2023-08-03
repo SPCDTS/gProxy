@@ -38,7 +38,7 @@ func NewReactor(opts ...Option) (*Reactor, error) {
 		evPolls:            make([]evPoll, evOptions.evPollNum),
 	}
 	var timer timer
-	if evOptions.noTimer {
+	if !evOptions.noTimer {
 		timer = newTimer4Heap(evOptions.timerHeapInitSize)
 	}
 	for i := 0; i < r.evPollNum; i++ {

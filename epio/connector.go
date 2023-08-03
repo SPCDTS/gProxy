@@ -180,8 +180,7 @@ func (p *inProgressConnect) OnWrite(fd int, now int64) bool {
 	p.r.RemoveEvHandler(p, fd)
 	p.fd = -1 //
 	p.eh.setReactor(p.r)
-	p.eh.SetFd(fd)
-	if p.eh.OnOpen(fd, now) {
+	if !p.eh.OnOpen(fd, now) {
 		p.eh.OnClose(fd)
 	}
 	return true

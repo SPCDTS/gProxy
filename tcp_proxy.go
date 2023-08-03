@@ -13,28 +13,19 @@ import (
 type PortProxy struct {
 	Server *net.TCPAddr
 	lcp    int // listen client port, proxy server在这个端口侦听client的连接
-	done   chan interface{}
+	done   chan struct{}
 }
 
 func NewPortProxy(server *net.TCPAddr) *PortProxy {
 	return &PortProxy{
 		Server: server,
-		done:   make(chan interface{}),
+		done:   make(chan struct{}),
 	}
 }
 
 // 通过判断done channel是否打开来确定是否正在进行转发
 func (p PortProxy) Running() bool {
-	if p.done != nil {
-		select {
-		case _, open := <-p.done:
-			if open {
-				return true
-			}
-		default:
-		}
-	}
-	return false
+	return p.done != nil
 }
 
 func ReuseConfig() net.ListenConfig {
