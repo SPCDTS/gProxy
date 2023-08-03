@@ -196,7 +196,7 @@ func NewProxyServer() *ProxyServer {
 	}
 	forNewFd, err := epio.NewReactor(
 		epio.EvDataArrSize(0), // default val
-		epio.EvPollNum(5),
+		epio.EvPollNum(13),
 		epio.EvReadyNum(512), // auto calc
 		epio.TimerHeapInitSize(10000),
 		epio.ReuseAddr(true),
@@ -204,17 +204,7 @@ func NewProxyServer() *ProxyServer {
 	if err != nil {
 		panic(err.Error())
 	}
-	forConn, err := epio.NewReactor(
-		epio.EvDataArrSize(0), // default val
-		epio.EvPollNum(5),
-		epio.EvReadyNum(512), // auto calc
-		epio.TimerHeapInitSize(10000),
-		epio.ReuseAddr(true),
-	)
-	if err != nil {
-		panic(err.Error())
-	}
-	connector, err := epio.NewConnector(forConn)
+	connector, err := epio.NewConnector(forNewFd)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -228,11 +218,6 @@ func NewProxyServer() *ProxyServer {
 	}()
 	go func() {
 		if err := p.forNewFd.Run(); err != nil {
-			panic(err.Error())
-		}
-	}()
-	go func() {
-		if err := forConn.Run(); err != nil {
 			panic(err.Error())
 		}
 	}()

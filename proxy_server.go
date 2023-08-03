@@ -21,6 +21,9 @@ func NewProxyC(c *epio.Connector, buddyAddr string) *ProxyC {
 	ps.buddy = pc
 	pc.SetFd(-1)
 	ps.SetFd(-1)
+	if err := c.Connect(buddyAddr, ps, 30000); err != nil {
+		panic(err.Error())
+	}
 	return pc
 }
 
@@ -29,15 +32,15 @@ func (p *ProxyC) OnOpen(fd int, now int64) bool {
 		return false
 	}
 	p.SetFd(fd)
-	if err := p.c.Connect(p.buddy.addr, p.buddy, 30000); err != nil {
-		return false
-	}
 	return true
 }
 
 func (p *ProxyC) OnRead(fd int, evPollSharedBuff []byte, now int64) bool {
 	buf := make([]byte, 4096)
-	<-p.buddy.ready
+	if p.buddy.GetFd() == -1 {
+		return true
+	}
+
 	for {
 		n, err := epio.Read(fd, buf)
 		if err != nil {
@@ -57,10 +60,10 @@ func (p *ProxyC) OnRead(fd int, evPollSharedBuff []byte, now int64) bool {
 }
 
 func (p *ProxyC) OnClose(fd int) {
-	fmt.Println("C-close")
 	p.GetReactor().RemoveEvHandler(p, fd)
 	epio.Close(fd)
-	p.closeOnce.Do(func() { p.buddy.OnClose(p.buddy.GetFd()) })
+	p.buddy.GetReactor().RemoveEvHandler(p.buddy, p.buddy.GetFd())
+	epio.Close(p.buddy.GetFd())
 }
 
 type ProxyS struct {
@@ -76,7 +79,6 @@ func (p *ProxyS) OnOpen(fd int, now int64) bool {
 		return false
 	}
 	p.SetFd(fd)
-	close(p.ready)
 	return true
 }
 func (p *ProxyS) OnRead(fd int, evPollSharedBuff []byte, now int64) bool {
@@ -100,11 +102,12 @@ func (p *ProxyS) OnRead(fd int, evPollSharedBuff []byte, now int64) bool {
 }
 
 func (p *ProxyS) OnClose(fd int) {
-	fmt.Println("S-close")
 	p.GetReactor().RemoveEvHandler(p, fd)
 	epio.Close(fd)
-	p.closeOnce.Do(func() { p.buddy.OnClose(p.buddy.GetFd()) })
+	p.buddy.GetReactor().RemoveEvHandler(p.buddy, p.buddy.GetFd())
+	epio.Close(p.buddy.GetFd())
 }
 func (p *ProxyS) OnConnectFail(err error) {
-	fmt.Println(err.Error())
+	fmt.Println("ProxyS: " + err.Error())
+	p.buddy.c.Connect(p.addr, p, 3000)
 }
