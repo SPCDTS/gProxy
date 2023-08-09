@@ -161,7 +161,7 @@ func NewProxyServer() *ProxyServer {
 	}
 	forNewFd, err := epio.NewReactor(
 		epio.EvDataArrSize(500),
-		epio.EvPollNum(13),
+		epio.EvPollNum(2),
 		epio.EvReadyNum(512),
 		epio.TimerHeapInitSize(10000),
 		epio.ReuseAddr(true),

@@ -36,7 +36,7 @@ func (p *ProxyC) OnOpen(fd int, now int64) bool {
 }
 
 func (p *ProxyC) OnRead(fd int, evPollSharedBuff []byte, now int64) bool {
-	buf := make([]byte, 4096)
+	buf := evPollSharedBuff
 	if p.buddy.GetFd() == -1 {
 		return true
 	}
@@ -82,7 +82,7 @@ func (p *ProxyS) OnOpen(fd int, now int64) bool {
 	return true
 }
 func (p *ProxyS) OnRead(fd int, evPollSharedBuff []byte, now int64) bool {
-	buf := make([]byte, 4096)
+	buf := evPollSharedBuff
 	for {
 		n, err := epio.Read(fd, buf)
 		if err != nil {
